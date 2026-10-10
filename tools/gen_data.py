@@ -67,9 +67,10 @@ def main():
             board = chess.Board()
             for u in book.split():
                 board.push_uci(u)
-            # alternate which player binary is white (same binary both sides
-            # here; color alternation still balances book sides)
-            order = players if g % 2 == 0 else players[::-1]            result = None
+            # alternate colors each game (balances book sides; when
+            # --engine2 is given this also mixes opponent strength)
+            order = players if g % 2 == 0 else players[::-1]
+            result = None
             game_pos = []
             while not board.is_game_over(claim_draw=True) and board.ply() < 400:
                 eng = order[0] if board.turn == chess.WHITE else order[1]
