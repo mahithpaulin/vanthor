@@ -5,10 +5,11 @@ competitively validate a high-performance UCI chess engine capable of
 being tested against **Stockfish 19** under preregistered, reproducible
 conditions.
 
-**Status (2026-10-10): Phase A complete (resource audit + engine survey).
-Phase B scaffold (v0.0.1): buildable UCI skeleton + CI + tournament-runner
-skeleton. The engine does NOT yet play chess at any strength — see
-`docs/` and `experiments/EXPERIMENT_LOG.md`. No strength claims are made.**
+**Status (2026-10-10): v0.1.0 — plays legal chess (plain alpha-beta +
+quiescence + HCEv1, ~5 Mnps on 2-core x86). Correctness proven: 6/6 perft
+exact at two depths, python-chess cross-check, Zobrist/FEN integrity
+(keytest), ASan/UBSan clean. Strength: weak (no ID/PVS/TT yet — that is
+v0.2.0). No rating claims are made.**
 
 ## Quick start
 
