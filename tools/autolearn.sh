@@ -103,7 +103,8 @@ EOF
             else
                 "$KAGGLE" datasets version -p "$LEARN/kdata" -m "round $ROUND" >> "$LOG" 2>&1 || true
             fi
-            SLUG="vanthor-train-r$ROUND"
+            SLUG="vanthor-net-r$ROUND"  # NOTE: kernel slug must differ from
+            # the dataset slug (Kaggle 409s otherwise): dataset=vanthor-train
             cp "$ROOT/tools/train_nnue.py" "$LEARN/kernel/kernel.py"
             cat > "$LEARN/kernel/kernel-metadata.json" <<EOF
 {"id": "mahithpaulin/$SLUG", "title": "$SLUG", "code_file": "kernel.py",
