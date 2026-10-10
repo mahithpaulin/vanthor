@@ -7,6 +7,7 @@
 int main() {
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
+    std::cout << std::unitbuf;  // flush every UCI reply (block-buffered pipes!)
     Attacks::init();
     Position::init_zobrist();
     Uci uci;
