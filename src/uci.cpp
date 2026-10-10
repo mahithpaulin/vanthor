@@ -290,15 +290,6 @@ void Uci::cmd_save_history() {
 void Uci::cmd_nnue_verify(const std::string& args) {
     // Incremental-accumulator integrity: random games, after every ply
     // compare incremental accs vs full recompute (tol 1e-3).
-    std::lock_guard<std::mutex> lk(out_m_);
-    if (hist_path_.empty()) {
-        std::cout << "info string SaveHistory: no HistoryFile set\n";
-        return;
-    }
-    std::cout << "info string SaveHistory "
-              << (search_.save_history(hist_path_) ? "ok " : "FAILED ")
-              << hist_path_ << "\n";
-}
     if (searching_.load()) return;
     if (!search_.net().loaded) {
         std::lock_guard<std::mutex> lk(out_m_);
