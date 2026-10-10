@@ -109,13 +109,13 @@ EOF
             cat > "$LEARN/kernel/kernel-metadata.json" <<EOF
 {"id": "mahithpaulin/$SLUG", "title": "$SLUG", "code_file": "kernel.py",
  "language": "python", "kernel_type": "script", "is_private": true,
- "enable_gpu": "True", "enable_tpu": "False", "enable_internet": "True",
- "dataset_sources": ["mahithpaulin/vanthor-train"],
- "competition_sources": [], "kernel_sources": []}
+ "enable_gpu": true, "enable_internet": true, "session_timeout_seconds": 10800,
+ "dataset_sources": ["mahithpaulin/vanthor-train"]}
 EOF
             # Kernel runs bare: train_nnue.py autodetects /kaggle/input paths
             # and its defaults (H=128, 60 epochs, batch 16384) are the recipe.
-            cd "$LEARN/kernel"            "$KAGGLE" kernels push -p . --accelerator NvidiaTeslaT4 >> "$LOG" 2>&1 || {
+            cd "$LEARN/kernel"
+            "$KAGGLE" kernels push -p . --accelerator NvidiaTeslaT4 >> "$LOG" 2>&1 || {
                 log "kernel push failed; will retry next round"; cd "$ROOT"
                 ROUND=$((ROUND+1)); set_state "$ROUND" INGEST; PHASE=INGEST; continue; }
             cd "$ROOT"
