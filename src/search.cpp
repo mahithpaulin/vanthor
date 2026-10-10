@@ -84,7 +84,7 @@ int Worker::quiescence(int alpha, int beta, int ply, bool pv) {
     Key key = pos_.key();
     TTEntry tte = sh_->tt->probe(key);
     Move tt_move = tte.hit ? tte.move : NO_MOVE;
-    if (tte.hit && tte.depth >= 0) {
+    if (tte.hit) {  // any stored depth dominates a qsearch node
         Score s = tt_to_search(tte.score, ply);
         if (tte.flag == TT_EXACT) return s;
         if (tte.flag == TT_LOWER && s >= beta) return s;
