@@ -79,17 +79,28 @@ def load_data(path, max_rows=0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", required=True)
-    ap.add_argument("--hidden", type=int, default=128)
-    ap.add_argument("--epochs", type=int, default=50)
-    ap.add_argument("--batch", type=int, default=4096)
-    ap.add_argument("--lr", type=float, default=0.001)
+    ap.add_argument("--data", default=os.environ.get("VNTH_DATA", ""))
+    ap.add_argument("--hidden", type=int,
+                    default=int(os.environ.get("VNTH_HIDDEN", "128")))
+    ap.add_argument("--epochs", type=int,
+                    default=int(os.environ.get("VNTH_EPOCHS", "50")))
+    ap.add_argument("--batch", type=int,
+                    default=int(os.environ.get("VNTH_BATCH", "4096")))
+    ap.add_argument("--lr", type=float,
+                    default=float(os.environ.get("VNTH_LR", "0.001")))
     ap.add_argument("--val-frac", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--max-rows", type=int, default=0)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--device", default="")
+    ap.add_argument("--out", default=os.environ.get("VNTH_OUT", ""))
+    ap.add_argument("--device", default=os.environ.get("VNTH_DEVICE", ""))
     args = ap.parse_args()
+    if not args.data or not args.out:
+        # Kaggle script kernels run bare (no CLI args): autodetect mounts.
+        if os.path.isdir("/kaggle/input/vanthor-train"):
+            args.data = args.data or "/kaggle/input/vanthor-train/train.txt"
+            args.out = args.out or "/kaggle/working/net.bin"
+    if not args.data or not args.out:
+        ap.error("--data and --out are required (or VNTH_DATA / VNTH_OUT)")
 
     import numpy as np
     import torch

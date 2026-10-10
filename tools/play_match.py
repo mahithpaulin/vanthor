@@ -62,8 +62,11 @@ def main():
     ap.add_argument("--name-white", default="white")
     ap.add_argument("--name-black", default="black")
     ap.add_argument("--opt", action="append", default=[],
-                    help="extra UCI option Name=value, repeatable "
-                         "(e.g. --opt EvalFile=/x/net.bin --opt UseNNUE=true)")
+                    help="extra UCI option Name=value for BOTH engines")
+    ap.add_argument("--opt-a", action="append", default=[],
+                    help="extra UCI option for engine A (--white binary only)")
+    ap.add_argument("--opt-b", action="append", default=[],
+                    help="extra UCI option for engine B (--black binary only)")
     args = ap.parse_args()
 
     import chess
@@ -87,13 +90,22 @@ def main():
 
     w_eng = chess.engine.SimpleEngine.popen_uci(args.white)
     b_eng = chess.engine.SimpleEngine.popen_uci(args.black)
-    base_opts = {"Threads": args.threads, "Hash": args.hash}
-    for o in args.opt:
-        if "=" in o:
-            k, v = o.split("=", 1)
-            base_opts[k] = True if v == "true" else (False if v == "false" else v)
-    for e in (w_eng, b_eng):
-        e.configure(base_opts)
+    def parse_opts(items):
+        d = {}
+        for o in items:
+            if "=" in o:
+                k, v = o.split("=", 1)
+                d[k] = True if v == "true" else (False if v == "false" else v)
+        return d
+
+    common = {"Threads": args.threads, "Hash": args.hash}
+    common.update(parse_opts(args.opt))
+    opts_a = dict(common)
+    opts_a.update(parse_opts(args.opt_a))
+    opts_b = dict(common)
+    opts_b.update(parse_opts(args.opt_b))
+    w_eng.configure(opts_a)
+    b_eng.configure(opts_b)
 
     pgn_games = []
     W = D = L = 0
