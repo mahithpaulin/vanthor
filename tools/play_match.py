@@ -81,7 +81,6 @@ def main():
 
     base, inc = parse_tc(args.tc) if args.tc else (0.0, 0.0)
     use_mtime = args.movetime > 0
-    use_nodes = args.nodes > 0
     nodes_a = args.nodes_a or args.nodes
     nodes_b = args.nodes_b or args.nodes
 
@@ -144,11 +143,13 @@ def main():
                 # than engine B: handicaps for strength anchoring.
                 a_to_move = (board.turn == chess.WHITE) == a_is_white
                 n = nodes_a if a_to_move else nodes_b
+                on_clock = False
                 if n > 0:
                     lim = chess.engine.Limit(nodes=n)
                 elif use_mtime:
                     lim = chess.engine.Limit(time=args.movetime / 1000.0)
                 else:
+                    on_clock = True
                     lim = chess.engine.Limit(
                         white_clock=wtime / 1000.0, black_clock=btime / 1000.0,
                         white_inc=winc / 1000.0, black_inc=binc / 1000.0)
@@ -168,7 +169,7 @@ def main():
                 wtime = max(0.0, wtime - spent + winc)
             else:
                 btime = max(0.0, btime - spent + binc)
-            if not use_mtime and not use_nodes and ((turn_white and wtime <= 0)
+            if not use_mtime and on_clock and ((turn_white and wtime <= 0)
                                   or (not turn_white and btime <= 0)):
                 result = "0-1" if turn_white else "1-0"
                 termination = "time forfeit"
