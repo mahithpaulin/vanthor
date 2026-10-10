@@ -57,6 +57,10 @@ def main():
     ap.add_argument("--movetime", type=int, default=0, help="ms per move")
     ap.add_argument("--nodes", type=int, default=0,
                     help="fixed nodes per move (deterministic, clock-independent)")
+    ap.add_argument("--nodes-a", type=int, default=0,
+                    help="fixed nodes for engine A (overrides --nodes)")
+    ap.add_argument("--nodes-b", type=int, default=0,
+                    help="fixed nodes for engine B (overrides --nodes)")
     ap.add_argument("--tc", default="", help="base+inc seconds, e.g. 10+0.1")
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--hash", type=int, default=32)
@@ -78,6 +82,8 @@ def main():
     base, inc = parse_tc(args.tc) if args.tc else (0.0, 0.0)
     use_mtime = args.movetime > 0
     use_nodes = args.nodes > 0
+    nodes_a = args.nodes_a or args.nodes
+    nodes_b = args.nodes_b or args.nodes
 
     # validate openings once
     books = []
@@ -134,8 +140,12 @@ def main():
             turn_white = board.turn == chess.WHITE
             eng = we if turn_white else be
             try:
-                if use_nodes:
-                    lim = chess.engine.Limit(nodes=args.nodes)
+                # engine A (--white binary) may have a different node budget
+                # than engine B: handicaps for strength anchoring.
+                a_to_move = (board.turn == chess.WHITE) == a_is_white
+                n = nodes_a if a_to_move else nodes_b
+                if n > 0:
+                    lim = chess.engine.Limit(nodes=n)
                 elif use_mtime:
                     lim = chess.engine.Limit(time=args.movetime / 1000.0)
                 else:
