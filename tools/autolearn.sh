@@ -176,15 +176,15 @@ EOF
             || { log "nnue_verify FAILED: candidate rejected"; ROUND=$((ROUND+1)); set_state "$ROUND" INGEST; PHASE=INGEST; continue; }
         CHAMP_KIND=$(python3 -c "import json;print(json.load(open('$LEARN/CHAMPION.json'))['kind'])")
         if [ "$CHAMP_KIND" = "HCE" ]; then
-            CHAMP_OPTS=(--opt-b UseNNUE=false)
+            CHAMP_OPTS=(--engine-b-opt UseNNUE=false)
         else
-            CHAMP_OPTS=(--opt-b UseNNUE=true "--opt-b EvalFile=$LEARN/nets/champion.bin")
+            CHAMP_OPTS=(--engine-b-opt UseNNUE=true "--engine-b-opt EvalFile=$LEARN/nets/champion.bin")
         fi
         # Engine A (--white binary) = candidate in every game; colors alternate
         # via the paired-book schedule, so FINAL W/D/L mixes both colors.
         python3 tools/play_match.py --white "$ENGINE" --black "$ENGINE" \
             --games 96 --movetime 100 --threads 1 --hash 32 \
-            --opt-a UseNNUE=true "--opt-a EvalFile=$CAND" \
+            --engine-a-opt UseNNUE=true "--engine-a-opt EvalFile=$CAND" \
             "${CHAMP_OPTS[@]}" \
             --pgn "$LEARN/reports/match_r${ROUND}.pgn" \
             --name-white "candidate-r$ROUND" --name-black "champion" \

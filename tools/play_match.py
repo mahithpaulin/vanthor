@@ -57,9 +57,9 @@ def main():
     ap.add_argument("--movetime", type=int, default=0, help="ms per move")
     ap.add_argument("--nodes", type=int, default=0,
                     help="fixed nodes per move (deterministic, clock-independent)")
-    ap.add_argument("--nodes-a", type=int, default=0,
+    ap.add_argument("--engine-a-nodes", type=int, default=0,
                     help="fixed nodes for engine A (overrides --nodes)")
-    ap.add_argument("--nodes-b", type=int, default=0,
+    ap.add_argument("--engine-b-nodes", type=int, default=0,
                     help="fixed nodes for engine B (overrides --nodes)")
     ap.add_argument("--tc", default="", help="base+inc seconds, e.g. 10+0.1")
     ap.add_argument("--threads", type=int, default=1)
@@ -69,9 +69,11 @@ def main():
     ap.add_argument("--name-black", default="black")
     ap.add_argument("--opt", action="append", default=[],
                     help="extra UCI option Name=value for BOTH engines")
-    ap.add_argument("--opt-a", action="append", default=[],
+    # NOTE: per-engine flags deliberately share NO prefix with --opt/--nodes:
+    # argparse prefix-matching misparses colliding names (observed live).
+    ap.add_argument("--engine-a-opt", action="append", default=[],
                     help="extra UCI option for engine A (--white binary only)")
-    ap.add_argument("--opt-b", action="append", default=[],
+    ap.add_argument("--engine-b-opt", action="append", default=[],
                     help="extra UCI option for engine B (--black binary only)")
     args = ap.parse_args()
 
@@ -81,8 +83,8 @@ def main():
 
     base, inc = parse_tc(args.tc) if args.tc else (0.0, 0.0)
     use_mtime = args.movetime > 0
-    nodes_a = args.nodes_a or args.nodes
-    nodes_b = args.nodes_b or args.nodes
+    nodes_a = args.engine_a_nodes or args.nodes
+    nodes_b = args.engine_b_nodes or args.nodes
 
     # validate openings once
     books = []
@@ -109,9 +111,9 @@ def main():
     common = {"Threads": args.threads, "Hash": args.hash}
     common.update(parse_opts(args.opt))
     opts_a = dict(common)
-    opts_a.update(parse_opts(args.opt_a))
+    opts_a.update(parse_opts(args.engine_a_opt))
     opts_b = dict(common)
-    opts_b.update(parse_opts(args.opt_b))
+    opts_b.update(parse_opts(args.engine_b_opt))
     w_eng.configure(opts_a)
     b_eng.configure(opts_b)
 
