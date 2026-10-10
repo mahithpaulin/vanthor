@@ -1,6 +1,7 @@
 // VANTHOR evaluate.cpp — HCE v1: tapered material + piece-square tables.
 // Original tables (own values, standard tapered scheme).
 #include "evaluate.h"
+#include "bitboard.h"
 
 namespace {
     const int MATV[6] = {100, 320, 330, 500, 900, 0};
