@@ -2,6 +2,7 @@
 #pragma once
 #include "position.h"
 #include "movegen.h"
+#include "evaluate.h"
 #include "nnue.h"
 #include "tt.h"
 #include <atomic>
