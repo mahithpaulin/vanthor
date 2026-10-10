@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--black", required=True)
     ap.add_argument("--games", type=int, default=48)
     ap.add_argument("--movetime", type=int, default=0, help="ms per move")
+    ap.add_argument("--nodes", type=int, default=0,
+                    help="fixed nodes per move (deterministic, clock-independent)")
     ap.add_argument("--tc", default="", help="base+inc seconds, e.g. 10+0.1")
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--hash", type=int, default=32)
@@ -75,6 +77,7 @@ def main():
 
     base, inc = parse_tc(args.tc) if args.tc else (0.0, 0.0)
     use_mtime = args.movetime > 0
+    use_nodes = args.nodes > 0
 
     # validate openings once
     books = []
@@ -131,7 +134,9 @@ def main():
             turn_white = board.turn == chess.WHITE
             eng = we if turn_white else be
             try:
-                if use_mtime:
+                if use_nodes:
+                    lim = chess.engine.Limit(nodes=args.nodes)
+                elif use_mtime:
                     lim = chess.engine.Limit(time=args.movetime / 1000.0)
                 else:
                     lim = chess.engine.Limit(
