@@ -158,7 +158,7 @@ def main():
                 wtime = max(0.0, wtime - spent + winc)
             else:
                 btime = max(0.0, btime - spent + binc)
-            if not use_mtime and ((turn_white and wtime <= 0)
+            if not use_mtime and not use_nodes and ((turn_white and wtime <= 0)
                                   or (not turn_white and btime <= 0)):
                 result = "0-1" if turn_white else "1-0"
                 termination = "time forfeit"
