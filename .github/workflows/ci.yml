@@ -30,6 +30,20 @@ jobs:
         run: |
           cmake -S . -B build-clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
           cmake --build build-clang -j2
+  tactics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+      - name: python-chess
+        run: pip install python-chess
+      - name: WAC suite @200k nodes (floor 230/300)
+        run: python3 tools/run_suite.py --engine ./build/vanthor --epd tests/wacnew.epd --nodes 200000 --min-solved 230
+      - name: self-play smoke (4 games, paired book)
+        run: python3 tools/play_match.py --white ./build/vanthor --black ./build/vanthor --games 4 --movetime 50 --name-white dev --name-black dev
   sanitize:
     runs-on: ubuntu-latest
     steps:
