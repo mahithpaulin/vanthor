@@ -2,6 +2,7 @@
 // Original implementation for Project Vanthor. Magic numbers are found at
 // startup by a deterministic search (fixed seed), so no external tables.
 #include "bitboard.h"
+#include <cstdio>
 
 namespace {
     // splitmix64 — deterministic PRNG for magic search
@@ -19,7 +20,7 @@ namespace {
 
     Bitboard KNIGHT_T[64], KING_T[64], PAWN_T[2][64];
 
-    struct Magic { Bitboard mask = 0; Bitboard magic = 0; int shift = 0; };
+    struct Magic { Bitboard mask = 0; Bitboard magic = 0; int shift = 0; bool ok = false; };
     Magic MAG_B[64], MAG_R[64];
     Bitboard ATK_B[64][512], ATK_R[64][4096];
 
@@ -58,7 +59,11 @@ namespace {
         return a;
     }
 
-    Bitboard find_magic(int sq, bool bishop) {
+    // Searches one RNG stream for a magic. Returns 0 on budget exhaustion
+    // (caller retries with a fresh seed). 0 is NEVER installed as a magic:
+    // fill_square() verifies exhaustively and falls back to direct
+    // computation for any square without a proven-good magic.
+    Bitboard find_magic(int sq, bool bishop, uint64_t seed) {
         const int (*dirs)[2] = bishop ? DIRS_B : DIRS_R;
         Bitboard mask = slide_mask(sq, dirs);
         int bits = popcount(mask);
@@ -75,12 +80,11 @@ namespace {
             }
             atk[i] = slide_attack(sq, occ[i], dirs);
         }
-        Rng rng(bishop ? 0x123456789ABCULL + (uint64_t)sq
-                       : 0xFEDCBA987654ULL + (uint64_t)sq * 0x9E37ULL);
+        Rng rng(seed);
         static Bitboard used[4096];
         static int used_epoch[4096];
         static int epoch = 0;
-        for (int tries = 0; tries < 1000000; tries++) {
+        for (int tries = 0; tries < 200000; tries++) {
             Bitboard magic = rng.sparse();
             // require the top bits of (mask*magic) to be reasonably dense
             if (popcount((mask * magic) & 0xFF00000000000000ULL) < 6) continue;
@@ -97,7 +101,47 @@ namespace {
             }
             if (!fail) return magic;
         }
-        return 0;  // unreachable in practice
+        return 0;  // budget exhausted: caller reseeds
+    }
+
+    // Fill one square's table from a candidate magic, then EXHAUSTIVELY
+    // verify every subset reads back the directly computed attack.
+    // Returns true only if the table is proven correct (sets mg.ok).
+    bool fill_square(int sq, bool bishop, Bitboard magic) {
+        const int (*dirs)[2] = bishop ? DIRS_B : DIRS_R;
+        Magic& mg = bishop ? MAG_B[sq] : MAG_R[sq];
+        mg.mask = slide_mask(sq, dirs);
+        mg.magic = magic;
+        mg.shift = 64 - popcount(mg.mask);
+        mg.ok = false;
+        if (magic == 0) return false;
+        int bits = popcount(mg.mask);
+        int n = 1 << bits;
+        for (int i = 0; i < n; i++) {
+            Bitboard occ = 0;
+            Bitboard m = mg.mask;
+            for (int b = 0; b < bits; b++) {
+                int s = poplsb(m);
+                if (i & (1 << b)) occ |= 1ULL << s;
+            }
+            int idx = int((occ * magic) >> mg.shift);
+            if (bishop) ATK_B[sq][idx] = slide_attack(sq, occ, dirs);
+            else ATK_R[sq][idx] = slide_attack(sq, occ, dirs);
+        }
+        for (int i = 0; i < n; i++) {
+            Bitboard occ = 0;
+            Bitboard m = mg.mask;
+            for (int b = 0; b < bits; b++) {
+                int s = poplsb(m);
+                if (i & (1 << b)) occ |= 1ULL << s;
+            }
+            Bitboard want = slide_attack(sq, occ, dirs);
+            Bitboard got = bishop ? ATK_B[sq][int((occ * magic) >> mg.shift)]
+                                  : ATK_R[sq][int((occ * magic) >> mg.shift)];
+            if (got != want) return false;
+        }
+        mg.ok = true;
+        return true;
     }
 }
 
@@ -134,37 +178,29 @@ namespace Attacks {
                 if (f < 7) PAWN_T[BLACK][sq] |= 1ULL << make_sq(f + 1, r - 1);
             }
         }
+        int fallbacks = 0;
         for (int sq = 0; sq < 64; sq++) {
-            MAG_B[sq].mask = slide_mask(sq, DIRS_B);
-            MAG_B[sq].magic = find_magic(sq, true);
-            MAG_B[sq].shift = 64 - popcount(MAG_B[sq].mask);
-            int n = 1 << popcount(MAG_B[sq].mask);
-            for (int i = 0; i < n; i++) {
-                Bitboard occ = 0;
-                Bitboard m = MAG_B[sq].mask;
-                int bits = popcount(m);
-                for (int b = 0; b < bits; b++) {
-                    int s = poplsb(m);
-                    if (i & (1 << b)) occ |= 1ULL << s;
-                }
-                int idx = int((occ * MAG_B[sq].magic) >> MAG_B[sq].shift);
-                ATK_B[sq][idx] = slide_attack(sq, occ, DIRS_B);
+            // bishops
+            bool ok = false;
+            for (uint64_t rs = 0; rs < 64 && !ok; rs++) {
+                Bitboard magic = find_magic(sq, true,
+                    0x123456789ABCULL + (uint64_t)sq * 0x10001ULL + rs * 0x9E3779B97F4A7C15ULL);
+                if (magic && fill_square(sq, true, magic)) ok = true;
             }
-            MAG_R[sq].mask = slide_mask(sq, DIRS_R);
-            MAG_R[sq].magic = find_magic(sq, false);
-            MAG_R[sq].shift = 64 - popcount(MAG_R[sq].mask);
-            n = 1 << popcount(MAG_R[sq].mask);
-            for (int i = 0; i < n; i++) {
-                Bitboard occ = 0;
-                Bitboard m = MAG_R[sq].mask;
-                int bits = popcount(m);
-                for (int b = 0; b < bits; b++) {
-                    int s = poplsb(m);
-                    if (i & (1 << b)) occ |= 1ULL << s;
-                }
-                int idx = int((occ * MAG_R[sq].magic) >> MAG_R[sq].shift);
-                ATK_R[sq][idx] = slide_attack(sq, occ, DIRS_R);
+            if (!ok) { MAG_B[sq].mask = slide_mask(sq, DIRS_B); fallbacks++; }
+            // rooks
+            ok = false;
+            for (uint64_t rs = 0; rs < 64 && !ok; rs++) {
+                Bitboard magic = find_magic(sq, false,
+                    0xFEDCBA987654ULL + (uint64_t)sq * 0x20003ULL + rs * 0xBF58476D1CE4E5B9ULL);
+                if (magic && fill_square(sq, false, magic)) ok = true;
             }
+            if (!ok) { MAG_R[sq].mask = slide_mask(sq, DIRS_R); fallbacks++; }
+        }
+        if (fallbacks) {
+            // UCI-safe: engines must not print on stdout at startup; stderr is fine.
+            fprintf(stderr, "info string vanthor: %d slider squares use direct attack computation\n",
+                    fallbacks);
         }
     }
 
@@ -173,10 +209,12 @@ namespace Attacks {
     Bitboard pawn(Color c, int sq) { return PAWN_T[c][sq]; }
     Bitboard bishop(int sq, Bitboard occ) {
         const Magic& mg = MAG_B[sq];
+        if (!mg.ok) return slide_attack(sq, occ, DIRS_B);
         return ATK_B[sq][((occ & mg.mask) * mg.magic) >> mg.shift];
     }
     Bitboard rook(int sq, Bitboard occ) {
         const Magic& mg = MAG_R[sq];
+        if (!mg.ok) return slide_attack(sq, occ, DIRS_R);
         return ATK_R[sq][((occ & mg.mask) * mg.magic) >> mg.shift];
     }
     Bitboard queen(int sq, Bitboard occ) { return bishop(sq, occ) | rook(sq, occ); }
