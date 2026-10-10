@@ -112,11 +112,9 @@ EOF
  "dataset_sources": ["mahithpaulin/vanthor-train"],
  "competition_sources": [], "kernel_sources": []}
 EOF
-            export VNTH_DATA=/kaggle/input/vanthor-train/train.txt
-            export VNTH_OUT=/kaggle/working/net.bin
-            export VNTH_HIDDEN=128 VNTH_EPOCHS=60 VNTH_BATCH=16384
-            cd "$LEARN/kernel"
-            "$KAGGLE" kernels push -p . --accelerator NvidiaTeslaT4 >> "$LOG" 2>&1 || {
+            # Kernel runs bare: train_nnue.py autodetects /kaggle/input paths
+            # and its defaults (H=128, 60 epochs, batch 16384) are the recipe.
+            cd "$LEARN/kernel"            "$KAGGLE" kernels push -p . --accelerator NvidiaTeslaT4 >> "$LOG" 2>&1 || {
                 log "kernel push failed; will retry next round"; cd "$ROOT"
                 ROUND=$((ROUND+1)); set_state "$ROUND" INGEST; PHASE=INGEST; continue; }
             cd "$ROOT"

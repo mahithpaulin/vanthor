@@ -83,9 +83,9 @@ def main():
     ap.add_argument("--hidden", type=int,
                     default=int(os.environ.get("VNTH_HIDDEN", "128")))
     ap.add_argument("--epochs", type=int,
-                    default=int(os.environ.get("VNTH_EPOCHS", "50")))
+                    default=int(os.environ.get("VNTH_EPOCHS", "60")))
     ap.add_argument("--batch", type=int,
-                    default=int(os.environ.get("VNTH_BATCH", "4096")))
+                    default=int(os.environ.get("VNTH_BATCH", "16384")))
     ap.add_argument("--lr", type=float,
                     default=float(os.environ.get("VNTH_LR", "0.001")))
     ap.add_argument("--val-frac", type=float, default=0.05)
