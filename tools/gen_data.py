@@ -36,6 +36,8 @@ def engine_uci(path, threads=1, hashmb=32):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", required=True)
+    ap.add_argument("--engine2", default="",
+                    help="second engine (default: same as --engine); colors alternate each game")
     ap.add_argument("--teacher", required=True)
     ap.add_argument("--teacher-name", default="stockfish19-sf_19")
     ap.add_argument("--games", type=int, default=50)
@@ -53,7 +55,8 @@ def main():
         tid = teach.id
     except Exception:
         tid = {}
-    players = [engine_uci(args.engine, 1, 32) for _ in range(2)]
+    players = [engine_uci(args.engine, 1, 32)]
+    players.append(engine_uci(args.engine2 or args.engine, 1, 32))
 
     n_pos = n_games = 0
     t0 = time.time()
@@ -66,8 +69,7 @@ def main():
                 board.push_uci(u)
             # alternate which player binary is white (same binary both sides
             # here; color alternation still balances book sides)
-            order = players if g % 2 == 0 else players[::-1]
-            result = None
+            order = players if g % 2 == 0 else players[::-1]            result = None
             game_pos = []
             while not board.is_game_over(claim_draw=True) and board.ply() < 400:
                 eng = order[0] if board.turn == chess.WHITE else order[1]
