@@ -2,6 +2,7 @@
 #pragma once
 #include "position.h"
 #include "movegen.h"
+#include "nnue.h"
 #include "tt.h"
 #include <atomic>
 #include <chrono>
@@ -28,6 +29,8 @@ struct SearchLimits {
 
 struct SharedState {
     TT* tt = nullptr;
+    const NnueWeights* weights = nullptr;  // null = HCE only
+    bool use_nnue = true;                  // UseNNUE option (default on)
     std::atomic<bool> stop{false};
     std::atomic<uint64_t> nodes{0};
     std::chrono::steady_clock::time_point hard_deadline;
@@ -63,10 +66,19 @@ private:
     SharedState* sh_;
     int tid_;
     Position pos_;
+    NnueState nn_;
+    bool use_nn_ = false;
     Move killers_[128][2];
     int history_[2][64][64];
 
     void poll();
+    int eval_state() {  // NNUE when available+enabled, else HCE
+        return (use_nn_ && nn_.ready()) ? nn_.evaluate(pos_.side()) : evaluate(pos_);
+    }
+    void do_move_nn(Move m);
+    void undo_move_nn(Move m);
+    void do_null_nn();
+    void undo_null_nn();
     int search(int depth, int alpha, int beta, int ply, bool pv, bool last_null);
     int quiescence(int alpha, int beta, int ply, bool pv);
     int search_root(const Position& root, MoveList& ml, int depth, int alpha, int beta,
@@ -80,6 +92,8 @@ class Search {
 public:
     Search() { sh_.tt = &tt_; }
     TT& tt() { return tt_; }
+    NnueWeights& net() { return net_; }
+    void set_use_nnue(bool b) { sh_.use_nnue = b; }
     // Runs synchronously; calls info() from the main search thread as
     // iterations complete. Returns when done or stopped.
     Move go(const Position& root, const SearchLimits& lim, int threads,
@@ -91,5 +105,6 @@ public:
 
 private:
     TT tt_;
+    NnueWeights net_;
     SharedState sh_;
 };

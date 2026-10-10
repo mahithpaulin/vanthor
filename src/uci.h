@@ -34,6 +34,7 @@ private:
     void cmd_display();
     void cmd_eval();
     void cmd_keytest(const std::string& args);
+    void cmd_nnue_verify(const std::string& args);
     bool play_uci_moves(const std::string& moves);
     void stop_search();  // signal + join (no output)
     void print_info(const InfoLine& il);

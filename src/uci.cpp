@@ -25,6 +25,8 @@ void Uci::cmd_uci() {
     std::cout << "option name LMR type check default true\n";
     std::cout << "option name RFP type check default true\n";
     std::cout << "option name CheckExt type check default true\n";
+    std::cout << "option name UseNNUE type check default true\n";
+    std::cout << "option name EvalFile type string default <empty>\n";
     std::cout << "uciok\n";
 }
 
@@ -261,7 +263,73 @@ void Uci::cmd_display() {
 void Uci::cmd_eval() {
     if (searching_.load()) return;
     std::lock_guard<std::mutex> lk(out_m_);
-    std::cout << "eval " << evaluate(pos_) << "\n";
+    std::cout << "eval hce " << evaluate(pos_);
+    if (search_.net().loaded) {
+        NnueState st;
+        st.set_weights(&search_.net());
+        st.full_refresh(pos_);
+        std::cout << " nnue " << st.evaluate(pos_.side());
+    }
+    std::cout << "\n";
+}
+
+void Uci::cmd_nnue_verify(const std::string& args) {
+    // Incremental-accumulator integrity: random games, after every ply
+    // compare incremental accs vs full recompute (tol 1e-3).
+    if (searching_.load()) return;
+    if (!search_.net().loaded) {
+        std::lock_guard<std::mutex> lk(out_m_);
+        std::cout << "nnue_verify FAIL no net loaded\n";
+        return;
+    }
+    int games = 10;
+    try { if (!args.empty()) games = std::stoi(args); } catch (...) {}
+    if (games < 1) games = 1;
+    if (games > 200) games = 200;
+    uint64_t rng = 0x9E3779B97F4A7C15ULL;
+    auto rnd = [&]() {
+        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+        return rng;
+    };
+    long plies = 0;
+    std::lock_guard<std::mutex> lk(out_m_);
+    for (int g = 0; g < games; g++) {
+        Position p;
+        NnueState st;
+        st.set_weights(&search_.net());
+        st.full_refresh(p);
+        for (int i = 0; i < 300; i++) {
+            MoveList ml;
+            generate_legal(p, ml);
+            if (ml.n == 0) break;
+            Move m = ml.m[rnd() % (uint64_t)ml.n];
+            // mirror Worker's capture bookkeeping
+            int cap_pt = NO_PIECE, cap_sq = -1;
+            if (move_is_capture(m)) {
+                int to = move_to(m);
+                if (move_is_ep(m)) {
+                    cap_pt = PAWN;
+                    cap_sq = to + (p.side() == WHITE ? -8 : 8);
+                } else {
+                    int v = p.piece_on(to);
+                    if (v >= 0) {
+                        cap_pt = v % 6;
+                        cap_sq = to;
+                    }
+                }
+            }
+            Color us = p.side();
+            p.do_move(m);
+            st.apply(p, m, us, cap_pt, cap_sq);
+            plies++;
+            if (!st.verify_acc(p, 1e-3f)) {
+                std::cout << "nnue_verify FAIL acc mismatch game " << g
+                          << " ply " << i << " " << move_name(m) << "\n";
+                return;
+            }
+        }
+    }
+    std::cout << "nnue_verify ok " << plies << "\n";
 }
 
 void Uci::cmd_keytest(const std::string& args) {
@@ -334,26 +402,46 @@ bool Uci::handle_line(const std::string& line) {
     else if (cmd == "d") cmd_display();
     else if (cmd == "eval") cmd_eval();
     else if (cmd == "keytest") cmd_keytest(rest);
+    else if (cmd == "nnue_verify") cmd_nnue_verify(rest);
     else if (cmd == "setoption") {
         std::istringstream o(rest);
         std::string tok, name, value, id;
         o >> tok;  // "name"
-        // name may be one token here (Hash/Threads/NullMove/LMR/RFP/CheckExt)
+        // name is one token here (Hash/Threads/NullMove/LMR/RFP/CheckExt/...)
         o >> name;
-        o >> tok;  // "value"
-        o >> value;
-        try {
-            if (name == "Threads" && !value.empty()) {
-                int t = std::stoi(value);
-                if (t >= 1 && t <= 8 && !searching_.load()) threads_ = t;
-            } else if (name == "Hash" && !value.empty()) {
-                int h = std::stoi(value);
-                if (!searching_.load()) search_.tt().resize(h);
-            } else if (name == "NullMove") opts_.nullmove = (value == "true");
-            else if (name == "LMR") opts_.lmr = (value == "true");
-            else if (name == "RFP") opts_.rfp = (value == "true");
-            else if (name == "CheckExt") opts_.checkext = (value == "true");
-        } catch (...) {}
+        if (name == "EvalFile") {
+            // file path: take the remainder of the line after "value"
+            std::string::size_type p = rest.find("value");
+            value = (p == std::string::npos) ? "" : rest.substr(p + 5);
+            while (!value.empty() && value[0] == ' ') value.erase(0, 1);
+            while (!value.empty() && value.back() == ' ') value.pop_back();
+            if (!searching_.load()) {
+                if (value.empty() || value == "<empty>" || value == "<none>") {
+                    search_.net().loaded = false;
+                } else {
+                    bool ok = search_.net().load(value);
+                    std::lock_guard<std::mutex> lk(out_m_);
+                    std::cout << "info string EvalFile "
+                              << (ok ? "loaded " : "FAILED ") << value << "\n";
+                }
+            }
+        } else {
+            o >> tok;  // "value"
+            o >> value;
+            try {
+                if (name == "Threads" && !value.empty()) {
+                    int t = std::stoi(value);
+                    if (t >= 1 && t <= 8 && !searching_.load()) threads_ = t;
+                } else if (name == "Hash" && !value.empty()) {
+                    int h = std::stoi(value);
+                    if (!searching_.load()) search_.tt().resize(h);
+                } else if (name == "NullMove") opts_.nullmove = (value == "true");
+                else if (name == "LMR") opts_.lmr = (value == "true");
+                else if (name == "RFP") opts_.rfp = (value == "true");
+                else if (name == "CheckExt") opts_.checkext = (value == "true");
+                else if (name == "UseNNUE") search_.set_use_nnue(value == "true");
+            } catch (...) {}
+        }
         (void)id;
     }
     else if (cmd == "quit" || cmd == "exit") {

@@ -8,7 +8,8 @@ endif()
 option(VANTHOR_SANITIZE "Build with ASan+UBSan" OFF)
 add_executable(vanthor
   src/main.cpp src/types.cpp src/bitboard.cpp src/position.cpp
-  src/movegen.cpp src/perft.cpp src/evaluate.cpp src/search.cpp src/tt.cpp src/uci.cpp)
+  src/movegen.cpp src/perft.cpp src/evaluate.cpp src/search.cpp src/tt.cpp
+  src/nnue.cpp src/uci.cpp)
 target_compile_options(vanthor PRIVATE -O3 -Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 target_link_libraries(vanthor PRIVATE Threads::Threads)

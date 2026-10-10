@@ -48,6 +48,41 @@ void Worker::poll() {
         sh_->stop.store(true, std::memory_order_relaxed);
 }
 
+void Worker::do_move_nn(Move m) {
+    int cap_pt = NO_PIECE, cap_sq = -1;
+    if (move_is_capture(m)) {
+        int to = move_to(m);
+        if (move_is_ep(m)) {
+            cap_pt = PAWN;
+            cap_sq = to + (pos_.side() == WHITE ? -8 : 8);
+        } else {
+            int v = pos_.piece_on(to);
+            if (v >= 0) {
+                cap_pt = v % 6;
+                cap_sq = to;
+            }
+        }
+    }
+    Color us = pos_.side();
+    pos_.do_move(m);
+    if (use_nn_) nn_.apply(pos_, m, us, cap_pt, cap_sq);
+}
+
+void Worker::undo_move_nn(Move m) {
+    pos_.undo_move(m);
+    if (use_nn_) nn_.revert();
+}
+
+void Worker::do_null_nn() {
+    pos_.do_null();
+    if (use_nn_) nn_.apply_null();
+}
+
+void Worker::undo_null_nn() {
+    pos_.undo_null();
+    if (use_nn_) nn_.revert();
+}
+
 void Worker::order_moves(MoveList& ml, int* scores, Move tt_move, int ply) {
     Color us = pos_.side();
     (void)us;
@@ -79,7 +114,7 @@ int Worker::quiescence(int alpha, int beta, int ply, bool pv) {
         if (sh_->stop.load(std::memory_order_relaxed)) return alpha;
     }
     if (pos_.half() >= 100 || pos_.repetitions() >= 2) return DRAW_SCORE;
-    if (ply >= MAX_PLY) return evaluate(pos_);
+    if (ply >= MAX_PLY) return eval_state();
 
     Key key = pos_.key();
     TTEntry tte = sh_->tt->probe(key);
@@ -92,7 +127,7 @@ int Worker::quiescence(int alpha, int beta, int ply, bool pv) {
     }
 
     bool check = pos_.in_check(pos_.side());
-    int stand = check ? -INF : evaluate(pos_);
+    int stand = check ? -INF : eval_state();
     if (!check) {
         if (stand >= beta) {
             sh_->tt->store(key, tt_move == NO_MOVE ? NO_MOVE : tt_move, search_to_tt(beta, ply), 0, TT_LOWER);
@@ -117,9 +152,9 @@ int Worker::quiescence(int alpha, int beta, int ply, bool pv) {
         std::swap(ml.m[i], ml.m[bi]);
         std::swap(scores[i], scores[bi]);
         if (!check && see_capture(pos_, ml.m[i]) < 0) continue;
-        pos_.do_move(ml.m[i]);
+        do_move_nn(ml.m[i]);
         int s = -quiescence(-beta, -alpha, ply + 1, pv);
-        pos_.undo_move(ml.m[i]);
+        undo_move_nn(ml.m[i]);
         if (sh_->stop.load(std::memory_order_relaxed)) return alpha;
         if (s > best) {
             best = s;
@@ -142,7 +177,7 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
         if (sh_->stop.load(std::memory_order_relaxed)) return alpha;
     }
     if (pos_.half() >= 100 || pos_.repetitions() >= 2) return DRAW_SCORE;
-    if (ply >= MAX_PLY) return evaluate(pos_);
+    if (ply >= MAX_PLY) return eval_state();
     if (depth <= 0) return quiescence(alpha, beta, ply, pv);
 
     // mate distance pruning
@@ -169,7 +204,7 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
         if (tte.flag == TT_UPPER && s <= alpha) return s;
     }
 
-    int eval = evaluate(pos_);
+    int eval = eval_state();
 
     // reverse futility pruning
     if (sh_->opts.rfp && !pv && !in_check && depth <= 3) {
@@ -179,10 +214,10 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
     // null-move pruning
     if (sh_->opts.nullmove && depth >= 3 && !in_check && !last_null &&
         eval >= beta && pos_.has_non_pawn(us)) {
-        pos_.do_null();
+        do_null_nn();
         int R = 3 + (depth > 6 ? 1 : 0);
         int s = -search(depth - 1 - R, -beta, -beta + 1, ply + 1, false, true);
-        pos_.undo_null();
+        undo_null_nn();
         if (sh_->stop.load(std::memory_order_relaxed)) return 0;
         if (s >= beta) return (s > MATE - 1000) ? beta : s;
     }
@@ -206,7 +241,7 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
         Move m = ml.m[i];
         bool capture = move_is_capture(m);
         bool promo = move_is_promo(m);
-        pos_.do_move(m);
+        do_move_nn(m);
         int s;
         if (moves_done == 0) {
             s = -search(depth - 1, -beta, -alpha, ply + 1, pv, false);
@@ -221,7 +256,7 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
             }
             if (r > 0) {
                 s = -search(depth - 1 - r, -alpha - 1, -alpha, ply + 1, false, false);
-                if (sh_->stop.load(std::memory_order_relaxed)) { pos_.undo_move(m); return 0; }
+                if (sh_->stop.load(std::memory_order_relaxed)) { undo_move_nn(m); return 0; }
                 if (s > alpha)  // research at full depth
                     s = -search(depth - 1, -alpha - 1, -alpha, ply + 1, false, false);
             } else {
@@ -230,7 +265,7 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
             if (!sh_->stop.load(std::memory_order_relaxed) && s > alpha && s < beta)
                 s = -search(depth - 1, -beta, -alpha, ply + 1, true, false);
         }
-        pos_.undo_move(m);
+        undo_move_nn(m);
         if (sh_->stop.load(std::memory_order_relaxed)) return 0;
         moves_done++;
         if (s > best) {
@@ -269,6 +304,11 @@ int Worker::search(int depth, int alpha, int beta, int ply, bool pv, bool last_n
 int Worker::search_root(const Position& root, MoveList& ml, int depth, int alpha,
                         int beta, Move& best, std::vector<Move>* pv_out) {
     pos_ = root;
+    use_nn_ = (sh_->weights && sh_->weights->loaded && sh_->use_nnue);
+    if (use_nn_) {
+        nn_.set_weights(sh_->weights);
+        nn_.full_refresh(root);
+    }
     int alpha_orig = alpha;
     TTEntry tte = sh_->tt->probe(root.key());
     Move tt_move = tte.hit ? tte.move : NO_MOVE;
@@ -282,7 +322,7 @@ int Worker::search_root(const Position& root, MoveList& ml, int depth, int alpha
             if (scores[j] > scores[bi]) bi = j;
         std::swap(ml.m[i], ml.m[bi]);
         std::swap(scores[i], scores[bi]);
-        pos_.do_move(ml.m[i]);
+        do_move_nn(ml.m[i]);
         int s;
         if (i == 0) s = -search(depth - 1, -beta, -alpha, 1, true, false);
         else {
@@ -290,7 +330,7 @@ int Worker::search_root(const Position& root, MoveList& ml, int depth, int alpha
             if (!sh_->stop.load(std::memory_order_relaxed) && s > alpha && s < beta)
                 s = -search(depth - 1, -beta, -alpha, 1, true, false);
         }
-        pos_.undo_move(ml.m[i]);
+        undo_move_nn(ml.m[i]);
         if (sh_->stop.load(std::memory_order_relaxed)) return best_score;
         if (s > best_score) {
             best_score = s;
@@ -452,6 +492,7 @@ Move Search::go(const Position& root, const SearchLimits& lim, int threads,
                 uint64_t* out_nodes) {
     sh_.lim = lim;
     sh_.opts = opts;
+    sh_.weights = &net_;
     sh_.stop.store(false, std::memory_order_relaxed);
     sh_.nodes.store(0, std::memory_order_relaxed);
     sh_.t0 = std::chrono::steady_clock::now();
