@@ -19,6 +19,8 @@ private:
     Search search_;
     SearchOptions opts_;
     int threads_ = 1;
+    std::string hist_path_;   // HistoryFile option (empty = disabled)
+    bool persist_hist_ = false;
 
     std::thread worker_;
     std::atomic<bool> searching_{false};
@@ -35,6 +37,7 @@ private:
     void cmd_eval();
     void cmd_keytest(const std::string& args);
     void cmd_nnue_verify(const std::string& args);
+    void cmd_save_history();
     bool play_uci_moves(const std::string& moves);
     void stop_search();  // signal + join (no output)
     void print_info(const InfoLine& il);

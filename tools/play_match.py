@@ -61,6 +61,9 @@ def main():
     ap.add_argument("--pgn", default="")
     ap.add_argument("--name-white", default="white")
     ap.add_argument("--name-black", default="black")
+    ap.add_argument("--opt", action="append", default=[],
+                    help="extra UCI option Name=value, repeatable "
+                         "(e.g. --opt EvalFile=/x/net.bin --opt UseNNUE=true)")
     args = ap.parse_args()
 
     import chess
@@ -84,8 +87,13 @@ def main():
 
     w_eng = chess.engine.SimpleEngine.popen_uci(args.white)
     b_eng = chess.engine.SimpleEngine.popen_uci(args.black)
+    base_opts = {"Threads": args.threads, "Hash": args.hash}
+    for o in args.opt:
+        if "=" in o:
+            k, v = o.split("=", 1)
+            base_opts[k] = True if v == "true" else (False if v == "false" else v)
     for e in (w_eng, b_eng):
-        e.configure({"Threads": args.threads, "Hash": args.hash})
+        e.configure(base_opts)
 
     pgn_games = []
     W = D = L = 0

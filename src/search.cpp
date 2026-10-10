@@ -4,6 +4,7 @@
 #include "evaluate.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -36,6 +37,74 @@ namespace {
 void Worker::clear_tables() {
     memset(killers_, 0, sizeof(killers_));
     memset(history_, 0, sizeof(history_));
+}
+
+namespace {
+    constexpr char HIST_MAGIC[10] = {'V','N','T','H','H','I','S','T','1','\0'};
+}
+
+bool Search::load_history(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    char magic[10] = {0};
+    bool ok = fread(magic, 1, 9, f) == 9 && memcmp(magic, HIST_MAGIC, 9) == 0;
+    int32_t buf[2][64][64];
+    ok = ok && fread(buf, 4, 2 * 64 * 64, f) == 2 * 64 * 64;
+    fclose(f);
+    if (!ok) return false;
+    std::lock_guard<std::mutex> lk(sh_.hist_m);
+    for (int c = 0; c < 2; c++)
+        for (int a = 0; a < 64; a++)
+            for (int b = 0; b < 64; b++) {
+                int v = buf[c][a][b];
+                if (v < 0) v = 0;
+                if (v > SharedState::HIST_CAP) v = SharedState::HIST_CAP;
+                sh_.hist[c][a][b] = v;
+            }
+    return true;
+}
+
+bool Search::save_history(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    int32_t buf[2][64][64];
+    {
+        std::lock_guard<std::mutex> lk(sh_.hist_m);
+        for (int c = 0; c < 2; c++)
+            for (int a = 0; a < 64; a++)
+                for (int b = 0; b < 64; b++)
+                    buf[c][a][b] = sh_.hist[c][a][b];
+    }
+    bool ok = fwrite(HIST_MAGIC, 1, 9, f) == 9
+           && fwrite(buf, 4, 2 * 64 * 64, f) == 2 * 64 * 64;
+    fclose(f);
+    return ok;
+}
+
+void Worker::snapshot_history() {
+    std::lock_guard<std::mutex> lk(sh_->hist_m);
+    memcpy(history_, sh_->hist, sizeof(history_));
+}
+
+void Worker::merge_history() {
+    std::lock_guard<std::mutex> lk(sh_->hist_m);
+    bool overflow = false;
+    for (int c = 0; c < 2; c++)
+        for (int a = 0; a < 64; a++)
+            for (int b = 0; b < 64; b++) {
+                long v = (long)sh_->hist[c][a][b] + history_[c][a][b];
+                if (v > SharedState::HIST_CAP) {
+                    v = SharedState::HIST_CAP;
+                    overflow = true;
+                }
+                sh_->hist[c][a][b] = (int)v;
+            }
+    if (overflow) {
+        for (int c = 0; c < 2; c++)
+            for (int a = 0; a < 64; a++)
+                for (int b = 0; b < 64; b++)
+                    sh_->hist[c][a][b] >>= 1;
+    }
 }
 
 void Worker::poll() {
@@ -371,6 +440,7 @@ void Worker::extract_pv(const Position& root, Move first, int depth, std::vector
 
 Move Worker::iterate(const Position& root, std::function<void(const InfoLine&)> info) {
     init_lmr();
+    snapshot_history();
     MoveList ml;
     generate_legal(root, ml);
     if (ml.n == 0) return NO_MOVE;
@@ -454,11 +524,13 @@ Move Worker::iterate(const Position& root, std::function<void(const InfoLine&)> 
         }
         if (sh_->stop.load(std::memory_order_relaxed)) break;
     }
+    merge_history();
     return best;
 }
 
 void Worker::helper_run(const Position& root, int depth_offset) {
     init_lmr();
+    snapshot_history();
     MoveList ml;
     generate_legal(root, ml);
     if (ml.n == 0) return;
@@ -485,6 +557,7 @@ void Worker::helper_run(const Position& root, int depth_offset) {
         }
         if (s > MATE - 1000 || s < -MATE + 1000) break;
     }
+    merge_history();
 }
 
 Move Search::go(const Position& root, const SearchLimits& lim, int threads,

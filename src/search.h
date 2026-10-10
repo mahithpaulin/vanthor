@@ -32,6 +32,12 @@ struct SharedState {
     TT* tt = nullptr;
     const NnueWeights* weights = nullptr;  // null = HCE only
     bool use_nnue = true;                  // UseNNUE option (default on)
+    // Shared move-history (butterfly), accumulated across searches and
+    // optionally persisted to disk: the engine's long-term learning.
+    // Workers snapshot it at iteration start and merge back at the end.
+    int hist[2][64][64] = {};
+    std::mutex hist_m;
+    static constexpr int HIST_CAP = (1 << 28);
     std::atomic<bool> stop{false};
     std::atomic<uint64_t> nodes{0};
     std::chrono::steady_clock::time_point hard_deadline;
@@ -73,6 +79,8 @@ private:
     int history_[2][64][64];
 
     void poll();
+    void snapshot_history();  // shared -> local at search start
+    void merge_history();     // local -> shared at search end
     int eval_state() {  // NNUE when available+enabled, else HCE
         return (use_nn_ && nn_.ready()) ? nn_.evaluate(pos_.side()) : evaluate(pos_);
     }
@@ -95,6 +103,9 @@ public:
     TT& tt() { return tt_; }
     NnueWeights& net() { return net_; }
     void set_use_nnue(bool b) { sh_.use_nnue = b; }
+    // Persistent learning: file format magic "VNTHHIST1" + int32[2][64][64].
+    bool load_history(const std::string& path);
+    bool save_history(const std::string& path);
     // Runs synchronously; calls info() from the main search thread as
     // iterations complete. Returns when done or stopped.
     Move go(const Position& root, const SearchLimits& lim, int threads,

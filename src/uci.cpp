@@ -13,6 +13,7 @@ Uci::Uci() = default;
 Uci::~Uci() {
     search_.stop();
     if (worker_.joinable()) worker_.join();
+    if (persist_hist_ && !hist_path_.empty()) search_.save_history(hist_path_);
 }
 
 void Uci::cmd_uci() {
@@ -27,6 +28,8 @@ void Uci::cmd_uci() {
     std::cout << "option name CheckExt type check default true\n";
     std::cout << "option name UseNNUE type check default true\n";
     std::cout << "option name EvalFile type string default <empty>\n";
+    std::cout << "option name PersistHistory type check default false\n";
+    std::cout << "option name HistoryFile type string default <empty>\n";
     std::cout << "uciok\n";
 }
 
@@ -273,9 +276,29 @@ void Uci::cmd_eval() {
     std::cout << "\n";
 }
 
+void Uci::cmd_save_history() {
+    std::lock_guard<std::mutex> lk(out_m_);
+    if (hist_path_.empty()) {
+        std::cout << "info string SaveHistory: no HistoryFile set\n";
+        return;
+    }
+    std::cout << "info string SaveHistory "
+              << (search_.save_history(hist_path_) ? "ok " : "FAILED ")
+              << hist_path_ << "\n";
+}
+
 void Uci::cmd_nnue_verify(const std::string& args) {
     // Incremental-accumulator integrity: random games, after every ply
     // compare incremental accs vs full recompute (tol 1e-3).
+    std::lock_guard<std::mutex> lk(out_m_);
+    if (hist_path_.empty()) {
+        std::cout << "info string SaveHistory: no HistoryFile set\n";
+        return;
+    }
+    std::cout << "info string SaveHistory "
+              << (search_.save_history(hist_path_) ? "ok " : "FAILED ")
+              << hist_path_ << "\n";
+}
     if (searching_.load()) return;
     if (!search_.net().loaded) {
         std::lock_guard<std::mutex> lk(out_m_);
@@ -403,26 +426,37 @@ bool Uci::handle_line(const std::string& line) {
     else if (cmd == "eval") cmd_eval();
     else if (cmd == "keytest") cmd_keytest(rest);
     else if (cmd == "nnue_verify") cmd_nnue_verify(rest);
+    else if (cmd == "savehistory") cmd_save_history();
     else if (cmd == "setoption") {
         std::istringstream o(rest);
         std::string tok, name, value, id;
         o >> tok;  // "name"
         // name is one token here (Hash/Threads/NullMove/LMR/RFP/CheckExt/...)
         o >> name;
-        if (name == "EvalFile") {
+        if (name == "EvalFile" || name == "HistoryFile") {
             // file path: take the remainder of the line after "value"
             std::string::size_type p = rest.find("value");
             value = (p == std::string::npos) ? "" : rest.substr(p + 5);
             while (!value.empty() && value[0] == ' ') value.erase(0, 1);
             while (!value.empty() && value.back() == ' ') value.pop_back();
             if (!searching_.load()) {
-                if (value.empty() || value == "<empty>" || value == "<none>") {
-                    search_.net().loaded = false;
-                } else {
-                    bool ok = search_.net().load(value);
-                    std::lock_guard<std::mutex> lk(out_m_);
-                    std::cout << "info string EvalFile "
-                              << (ok ? "loaded " : "FAILED ") << value << "\n";
+                if (name == "EvalFile") {
+                    if (value.empty() || value == "<empty>" || value == "<none>") {
+                        search_.net().loaded = false;
+                    } else {
+                        bool ok = search_.net().load(value);
+                        std::lock_guard<std::mutex> lk(out_m_);
+                        std::cout << "info string EvalFile "
+                                  << (ok ? "loaded " : "FAILED ") << value << "\n";
+                    }
+                } else {  // HistoryFile
+                    hist_path_ = (value == "<empty>" || value == "<none>") ? "" : value;
+                    if (!hist_path_.empty() && persist_hist_) {
+                        bool ok = search_.load_history(hist_path_);
+                        std::lock_guard<std::mutex> lk(out_m_);
+                        std::cout << "info string HistoryFile "
+                                  << (ok ? "loaded " : "new ") << hist_path_ << "\n";
+                    }
                 }
             }
         } else {
@@ -440,6 +474,15 @@ bool Uci::handle_line(const std::string& line) {
                 else if (name == "RFP") opts_.rfp = (value == "true");
                 else if (name == "CheckExt") opts_.checkext = (value == "true");
                 else if (name == "UseNNUE") search_.set_use_nnue(value == "true");
+                else if (name == "PersistHistory") {
+                    persist_hist_ = (value == "true");
+                    if (persist_hist_ && !hist_path_.empty() && !searching_.load()) {
+                        bool ok = search_.load_history(hist_path_);
+                        std::lock_guard<std::mutex> lk(out_m_);
+                        std::cout << "info string HistoryFile "
+                                  << (ok ? "loaded " : "new ") << hist_path_ << "\n";
+                    }
+                }
             } catch (...) {}
         }
         (void)id;
