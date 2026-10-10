@@ -54,7 +54,8 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
     if [ "$PHASE" = "INGEST" ]; then
         log "=== round $ROUND INGEST ==="
         cd "$ROOT"
-        git pull --quiet 2>/dev/null || true
+        git pull 2>&1 | tail -n2 >> "$LOG" || log "git pull FAILED (continuing)"
+        log "HEAD=$(git rev-parse --short HEAD)"
         cmake --build build -j2 2>&1 | tail -n1 >> "$LOG"
         python3 tools/gen_data.py --engine "$ENGINE" --engine2 "$SPAR" \
             --teacher "$TEACHER" --games 400 --movetime 30 --depth 8 \
@@ -186,6 +187,9 @@ EOF
     # ---- PROMOTE decision --------------------------------------------------
     if [ "$PHASE" = "PROMOTE" ]; then
         log "=== round $ROUND PROMOTE ==="
+        if [ ! -f "$LEARN/reports/match_r${ROUND}.pgn" ]; then
+            log "PROMOTE skipped: no match PGN (match step failed, see match log)"
+        else
         python3 - "$LEARN" "$ROUND" >> "$LOG" 2>&1 <<'EOF'
 import json, re, sys, subprocess
 learn, rnd = sys.argv[1], sys.argv[2]
@@ -236,6 +240,7 @@ else:
     json.dump(ch, open(f"{learn}/CHAMPION.json", "w"), indent=2)
     print("kept champion")
 EOF
+        fi
         ROUND=$((ROUND+1)); set_state "$ROUND" INGEST; PHASE=INGEST
     fi
 done
