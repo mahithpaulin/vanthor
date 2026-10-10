@@ -51,35 +51,25 @@ void Uci::cmd_position(const std::string& args) {
     std::istringstream in(args);
     std::string tok;
     in >> tok;
-    std::string rest;
+    std::string rest, moves;
+    std::getline(in, rest);
     if (tok == "startpos") {
         pos_.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-        std::getline(in, rest);
+        std::string::size_type p = rest.find("moves");
+        if (p != std::string::npos) moves = rest.substr(p + 5);
     } else if (tok == "fen") {
-        // fen <6 fields> [moves ...]
-        std::string f, moves;
-        std::getline(in, rest);
-        // split off trailing " moves ..."
+        // rest = " <fen 6 fields> [moves ...]"
         std::string::size_type p = rest.find(" moves ");
-        if (p != std::string::npos) {
-            moves = rest.substr(p + 7);
-            f = rest.substr(0, p);
-        } else f = rest;
-        // trim leading space
+        std::string f = (p == std::string::npos) ? rest : rest.substr(0, p);
+        if (p != std::string::npos) moves = rest.substr(p + 7);
         while (!f.empty() && f[0] == ' ') f.erase(0, 1);
         if (!pos_.set_fen(f)) {
             std::cout << "info string error: bad FEN\n";
             return;
         }
-        rest = moves.empty() ? "" : (" " + moves);
     } else return;
-    {
-        std::string::size_type p = rest.find("moves");
-        if (p != std::string::npos) {
-            if (!play_uci_moves(rest.substr(p + 5)))
-                std::cout << "info string error: illegal move in list\n";
-        }
-    }
+    if (!moves.empty() && !play_uci_moves(moves))
+        std::cout << "info string error: illegal move in list\n";
 }
 
 void Uci::cmd_go(const std::string& args) {
