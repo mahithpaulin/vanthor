@@ -1,0 +1,28 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: compiler versions
+        run: |
+          g++ --version
+          clang++ --version || true
+          cmake --version
+      - name: configure (g++)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: build
+        run: cmake --build build -j2
+      - name: sha256
+        run: sha256sum build/vanthor
+      - name: UCI smoke test
+        run: python3 tests/test_uci.py --engine ./build/vanthor
+      - name: elo self-check
+        run: python3 tools/elo.py --self-check
+      - name: tournament self-test
+        run: python3 tools/tournament.py --self-test --out tournaments/self-test && cat tournaments/self-test/summary.txt
+      - name: clang build (no test, warnings as errors check)
+        run: |
+          cmake -S . -B build-clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-clang -j2
