@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
-project(vanthor VERSION 0.0.1 LANGUAGES CXX)
+project(vanthor VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-add_executable(vanthor src/main.cpp src/uci.cpp)
+option(VANTHOR_SANITIZE "Build with ASan+UBSan" OFF)
+add_executable(vanthor
+  src/main.cpp src/types.cpp src/bitboard.cpp src/position.cpp
+  src/movegen.cpp src/perft.cpp src/evaluate.cpp src/search.cpp src/uci.cpp)
 target_compile_options(vanthor PRIVATE -O3 -Wall -Wextra -Wpedantic)
+if(VANTHOR_SANITIZE)
+  target_compile_options(vanthor PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(vanthor PRIVATE -fsanitize=address,undefined)
+endif()
