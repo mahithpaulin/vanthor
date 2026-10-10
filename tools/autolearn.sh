@@ -54,8 +54,17 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
     if [ "$PHASE" = "INGEST" ]; then
         log "=== round $ROUND INGEST ==="
         cd "$ROOT"
-        git pull 2>&1 | tail -n2 >> "$LOG" || log "git pull FAILED (continuing)"
+        HEAD_BEFORE=$(git rev-parse HEAD)
+        for i in 1 2 3; do
+            if git pull 2>&1 | tail -n2 >> "$LOG"; then break; fi
+            log "git pull attempt $i failed; retrying"
+            sleep 20
+        done
         log "HEAD=$(git rev-parse --short HEAD)"
+        if [ "$(git rev-parse HEAD)" != "$HEAD_BEFORE" ]; then
+            log "updated to new HEAD: re-exec to run the new code cleanly"
+            exec bash tools/autolearn.sh
+        fi
         cmake --build build -j2 2>&1 | tail -n1 >> "$LOG"
         python3 tools/gen_data.py --engine "$ENGINE" --engine2 "$SPAR" \
             --teacher "$TEACHER" --games 400 --movetime 30 --depth 8 \
