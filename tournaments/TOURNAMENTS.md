@@ -1,5 +1,19 @@
 # Tournament log
 
+## T-0002 — strength anchor vs Stockfish 19 (2026-10-10, box, fixed nodes)
+
+- Vanthor: v0.2.0 HCE (`30cdbbb`-era binary, Threads 1). SF19: `edb0d9d`
+  source build (`154ad263…`), Threads 1. Runner: play_match.py fixed-nodes.
+- 1:1 (10k:10k), 24 games: **0-0-24**, all checkmates. Unresolvable directly.
+- 10:1 (V10k : SF1k), 24 games: **0-3-21**, dE=−470, 95% CI [−3600, −289].
+- 50:1 (V10k : SF200), 24 games: **2-10-12**, dE=−154, 95% CI [−364, −18].
+- Synthesis: SF self-scaling (~90 Elo/doubling in this range) projects the
+  equal-node gap to **≈ −650 ± 150 Elo vs SF19**. With SF19 ≈ 3700 on this
+  class of hardware, Vanthor-HCE ≈ **≈3050 ± 150** (engine scale, provisional,
+  24-game samples, fixed-nodes ≠ tournament TC — do not cite as a rating).
+- Context: zero search tuning done so far; NNUE not yet integrated. The gap
+  is the honest baseline the learning loop must close.
+
 ## T-0001 — v0.2.0-dev vs v0.1.0 (2026-10-10, Codespaces 2-core box)
 
 - White binary: vanthor @ `119eb9b` (dev, v0.2.0 search)
