@@ -25,7 +25,7 @@ jobs:
       - name: tournament self-test
         run: python3 tools/tournament.py --self-test --out tournaments/self-test && cat tournaments/self-test/summary.txt
       - name: bench smoke (deterministic nodes)
-        run: printf 'bench\nquit\n' | ./build/vanthor
+        run: printf 'bench\nquit\n' | timeout 120 ./build/vanthor
       - name: clang build (no test, warnings check)
         run: |
           cmake -S . -B build-clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release

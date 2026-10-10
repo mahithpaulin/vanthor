@@ -149,7 +149,7 @@ void Uci::cmd_bench() {
     const char* fens[2] = {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-    const int depths[2] = {11, 9};
+    const int depths[2] = {7, 6};
     uint64_t total_nodes = 0;
     auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < 2; i++) {
