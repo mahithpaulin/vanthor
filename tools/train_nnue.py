@@ -95,10 +95,14 @@ def main():
     ap.add_argument("--device", default=os.environ.get("VNTH_DEVICE", ""))
     args = ap.parse_args()
     if not args.data or not args.out:
-        # Kaggle script kernels run bare (no CLI args): autodetect mounts.
-        if os.path.isdir("/kaggle/input/vanthor-train"):
-            args.data = args.data or "/kaggle/input/vanthor-train/train.txt"
-            args.out = args.out or "/kaggle/working/net.bin"
+        # Kaggle script kernels run bare (no CLI args): autodetect mounts
+        # (/kaggle/input/.../<slug>/train.txt, layout varies).
+        if not args.data and os.path.isdir("/kaggle/input"):
+            for dp, _dn, fn in os.walk("/kaggle/input"):
+                if "train.txt" in fn:
+                    args.data = os.path.join(dp, "train.txt")
+                    break
+        args.out = args.out or "/kaggle/working/net.bin"
     if not args.data or not args.out:
         ap.error("--data and --out are required (or VNTH_DATA / VNTH_OUT)")
 
