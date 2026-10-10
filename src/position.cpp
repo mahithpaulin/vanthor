@@ -311,3 +311,35 @@ int Position::repetitions() const {
         if (k == key_) n++;
     return n - 1;  // occurrences before the current one
 }
+
+void Position::do_null() {
+    Undo u;
+    u.move = NO_MOVE;
+    u.captured = NO_PIECE;
+    u.castling = castling_;
+    u.ep = ep_;
+    u.half = half_;
+    u.key = key_;
+    if (ep_ != NO_SQ) key_ ^= ZOB_EP[file_of(ep_)];
+    ep_ = NO_SQ;
+    half_++;
+    side_ = opposite(side_);
+    key_ ^= ZOB_SIDE;
+    history_.push_back(u);
+    game_keys_.push_back(key_);
+}
+
+void Position::undo_null() {
+    Undo u = history_.back();
+    history_.pop_back();
+    game_keys_.pop_back();
+    side_ = opposite(side_);
+    ep_ = u.ep;
+    half_ = u.half;
+    castling_ = u.castling;  // unchanged by null, restored for safety
+    key_ = u.key;
+}
+
+bool Position::has_non_pawn(Color c) const {
+    return (bb_[c][KNIGHT] | bb_[c][BISHOP] | bb_[c][ROOK] | bb_[c][QUEEN]) != 0;
+}

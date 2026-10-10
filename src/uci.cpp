@@ -1,4 +1,4 @@
-// VANTHOR uci.cpp — protocol loop. Original implementation.
+// VANTHOR uci.cpp — async protocol loop. Original implementation.
 #include "uci.h"
 #include "version.h"
 #include "movegen.h"
@@ -10,11 +10,21 @@
 
 Uci::Uci() = default;
 
+Uci::~Uci() {
+    search_.stop();
+    if (worker_.joinable()) worker_.join();
+}
+
 void Uci::cmd_uci() {
+    std::lock_guard<std::mutex> lk(out_m_);
     std::cout << "id name " << VANTHOR_NAME << " " << VANTHOR_VERSION << "\n";
     std::cout << "id author Project Vanthor\n";
     std::cout << "option name Hash type spin default 16 min 1 max 1024\n";
     std::cout << "option name Threads type spin default 1 min 1 max 8\n";
+    std::cout << "option name NullMove type check default true\n";
+    std::cout << "option name LMR type check default true\n";
+    std::cout << "option name RFP type check default true\n";
+    std::cout << "option name CheckExt type check default true\n";
     std::cout << "uciok\n";
 }
 
@@ -48,6 +58,7 @@ bool Uci::play_uci_moves(const std::string& moves) {
 }
 
 void Uci::cmd_position(const std::string& args) {
+    if (searching_.load()) return;  // protocol violation; ignore while busy
     std::istringstream in(args);
     std::string tok;
     in >> tok;
@@ -58,21 +69,42 @@ void Uci::cmd_position(const std::string& args) {
         std::string::size_type p = rest.find("moves");
         if (p != std::string::npos) moves = rest.substr(p + 5);
     } else if (tok == "fen") {
-        // rest = " <fen 6 fields> [moves ...]"
         std::string::size_type p = rest.find(" moves ");
         std::string f = (p == std::string::npos) ? rest : rest.substr(0, p);
         if (p != std::string::npos) moves = rest.substr(p + 7);
         while (!f.empty() && f[0] == ' ') f.erase(0, 1);
         if (!pos_.set_fen(f)) {
+            std::lock_guard<std::mutex> lk(out_m_);
             std::cout << "info string error: bad FEN\n";
             return;
         }
     } else return;
-    if (!moves.empty() && !play_uci_moves(moves))
+    if (!moves.empty() && !play_uci_moves(moves)) {
+        std::lock_guard<std::mutex> lk(out_m_);
         std::cout << "info string error: illegal move in list\n";
+    }
+}
+
+void Uci::print_info(const InfoLine& il) {
+    std::lock_guard<std::mutex> lk(out_m_);
+    std::cout << "info depth " << il.depth << " score cp " << il.score
+              << " nodes " << il.nodes << " time " << il.ms << " nps "
+              << (il.ms > 0 ? (il.nodes * 1000 / (uint64_t)il.ms) : il.nodes);
+    if (!il.pv.empty()) {
+        std::cout << " pv";
+        for (Move m : il.pv) std::cout << " " << move_name(m);
+    }
+    std::cout << "\n";
+}
+
+void Uci::stop_search() {
+    search_.stop();
+    if (worker_.joinable()) worker_.join();
+    searching_.store(false);
 }
 
 void Uci::cmd_go(const std::string& args) {
+    if (searching_.load()) stop_search();  // stop any previous search first
     SearchLimits lim;
     lim.depth = 64;
     int64_t movetime = -1, wtime = -1, btime = -1, winc = 0, binc = 0;
@@ -91,49 +123,74 @@ void Uci::cmd_go(const std::string& args) {
         else if (tok == "movestogo" && (in >> tok)) movestogo = std::stoi(tok);
         else if (tok == "infinite") lim.infinite = true;
     }
-    if (movetime >= 0) lim.time_ms = movetime;
-    else if ((pos_.side() == WHITE ? wtime : btime) >= 0 && !lim.infinite) {
+    if (movetime >= 0) {
+        lim.soft_ms = movetime;
+        lim.hard_ms = movetime;
+    } else if ((pos_.side() == WHITE ? wtime : btime) >= 0 && !lim.infinite) {
         int64_t left = (pos_.side() == WHITE) ? wtime : btime;
         int64_t inc = (pos_.side() == WHITE) ? winc : binc;
-        int64_t alloc;
-        if (movestogo > 0) alloc = left / movestogo + inc / 2;
-        else alloc = left / 30 + inc / 2;
-        if (alloc < 10) alloc = 10;
-        if (alloc > left / 2 && left > 100) alloc = left / 2;
-        lim.time_ms = alloc;
+        int64_t soft;
+        if (movestogo > 0) soft = left / movestogo + inc / 2;
+        else soft = left / 30 + inc / 2;
+        if (soft < 10) soft = 10;
+        int64_t hard = soft * 5;
+        if (hard > left / 2 && left > 100) hard = left / 2;
+        if (hard < soft) hard = soft;
+        lim.soft_ms = soft;
+        lim.hard_ms = hard;
     }
-    if (!have_depth && lim.time_ms < 0 && !lim.infinite && lim.max_nodes == UINT64_MAX) {
+    if (!have_depth && lim.soft_ms < 0 && !lim.infinite && lim.max_nodes == UINT64_MAX)
         lim.depth = 8;  // bare `go`: keep it bounded
-    }
-    auto t0 = std::chrono::steady_clock::now();
-    SearchResult r = searcher_.go(pos_, lim);
-    auto t1 = std::chrono::steady_clock::now();
-    int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-    uint64_t nps = ms > 0 ? (r.nodes * 1000 / (uint64_t)ms) : r.nodes;
-    std::cout << "info depth " << r.depth << " score cp " << r.score
-              << " nodes " << r.nodes << " time " << ms << " nps " << nps << "\n";
-    std::cout << "bestmove " << move_name(r.best) << "\n";
+
+    Position root = pos_;
+    int threads = threads_;
+    SearchOptions opts = opts_;
+    searching_.store(true);
+    worker_ = std::thread([this, root, lim, threads, opts]() {
+        uint64_t nodes = 0;
+        Move best = search_.go(root, lim, threads, opts,
+                               [this](const InfoLine& il) { print_info(il); },
+                               &nodes);
+        {
+            std::lock_guard<std::mutex> lk(out_m_);
+            std::cout << "bestmove " << move_name(best) << "\n";
+            if (pending_ready_.exchange(false)) std::cout << "readyok\n";
+        }
+        searching_.store(false);
+    });
 }
 
 void Uci::cmd_perft(const std::string& args) {
+    if (searching_.load()) return;
     int depth = 0;
     try { depth = std::stoi(args); } catch (...) { return; }
-    if (depth < 0 || depth > 8) { std::cout << "info string perft depth 0..8\n"; return; }
+    if (depth < 0 || depth > 8) {
+        std::lock_guard<std::mutex> lk(out_m_);
+        std::cout << "info string perft depth 0..8\n";
+        return;
+    }
     auto t0 = std::chrono::steady_clock::now();
     uint64_t nodes = perft(pos_, depth);
     auto t1 = std::chrono::steady_clock::now();
     int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     uint64_t nps = ms > 0 ? (nodes * 1000 / (uint64_t)ms) : nodes;
+    std::lock_guard<std::mutex> lk(out_m_);
     std::cout << "nodes " << nodes << " time " << ms << " nps " << nps << "\n";
 }
 
 void Uci::cmd_divide(const std::string& args) {
+    if (searching_.load()) return;
     int depth = 0;
     try { depth = std::stoi(args); } catch (...) { return; }
-    if (depth < 1 || depth > 7) { std::cout << "info string divide depth 1..7\n"; return; }
+    if (depth < 1 || depth > 7) {
+        std::lock_guard<std::mutex> lk(out_m_);
+        std::cout << "info string divide depth 1..7\n";
+        return;
+    }
     MoveList ml;
     generate_legal(pos_, ml);
     uint64_t total = 0;
+    std::lock_guard<std::mutex> lk(out_m_);
     for (int i = 0; i < ml.n; i++) {
         pos_.do_move(ml.m[i]);
         uint64_t n = perft(pos_, depth - 1);
@@ -145,32 +202,40 @@ void Uci::cmd_divide(const std::string& args) {
 }
 
 void Uci::cmd_bench() {
-    // fixed benchmark: two positions, fixed depths → deterministic node counts
+    if (searching_.load()) return;
     const char* fens[2] = {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-    const int depths[2] = {7, 6};
+    const int depths[2] = {10, 8};
     uint64_t total_nodes = 0;
     auto t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < 2; i++) {
-        Position p;
-        p.set_fen(fens[i]);
-        SearchLimits lim;
-        lim.depth = depths[i];
-        lim.infinite = true;  // no clock: fixed-depth node count is deterministic
-        Searcher s;
-        SearchResult r = s.go(p, lim);
-        total_nodes += r.nodes;
-        std::cout << "info string bench pos " << i << " depth " << depths[i]
-                  << " nodes " << r.nodes << " bestmove " << move_name(r.best) << "\n";
+    {
+        std::lock_guard<std::mutex> lk(out_m_);
+        for (int i = 0; i < 2; i++) {
+            Position p;
+            p.set_fen(fens[i]);
+            SearchLimits lim;
+            lim.depth = depths[i];
+            lim.infinite = true;
+            uint64_t nodes = 0;
+            Search fresh;  // fresh TT: deterministic node counts
+            Move best = fresh.go(p, lim, 1, opts_,
+                                 [&](const InfoLine&) {}, &nodes);
+            total_nodes += nodes;
+            std::cout << "info string bench pos " << i << " depth " << depths[i]
+                      << " nodes " << nodes << " bestmove " << move_name(best) << "\n";
+        }
     }
     auto t1 = std::chrono::steady_clock::now();
     int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     uint64_t nps = ms > 0 ? (total_nodes * 1000 / (uint64_t)ms) : total_nodes;
+    std::lock_guard<std::mutex> lk(out_m_);
     std::cout << "nodes " << total_nodes << " time " << ms << " nps " << nps << "\n";
 }
 
 void Uci::cmd_display() {
+    if (searching_.load()) return;
+    std::lock_guard<std::mutex> lk(out_m_);
     for (int r = 7; r >= 0; r--) {
         std::cout << (r + 1) << " ";
         for (int f = 0; f < 8; f++) {
@@ -192,13 +257,13 @@ void Uci::cmd_display() {
 }
 
 void Uci::cmd_eval() {
+    if (searching_.load()) return;
+    std::lock_guard<std::mutex> lk(out_m_);
     std::cout << "eval " << evaluate(pos_) << "\n";
 }
 
 void Uci::cmd_keytest(const std::string& args) {
-    // Deterministic integrity test: play N pseudo-random games (LCG-selected
-    // legal moves), verifying incremental Zobrist key == recomputed key after
-    // every ply and FEN round-trip stability. Prints "keytest ok <plies>".
+    if (searching_.load()) return;
     int games = 20;
     try { if (!args.empty()) games = std::stoi(args); } catch (...) {}
     if (games < 1) games = 1;
@@ -209,6 +274,7 @@ void Uci::cmd_keytest(const std::string& args) {
         return rng;
     };
     long plies = 0;
+    std::lock_guard<std::mutex> lk(out_m_);
     for (int g = 0; g < games; g++) {
         Position p;
         for (int i = 0; i < 300; i++) {
@@ -243,12 +309,23 @@ bool Uci::handle_line(const std::string& line) {
     std::getline(in, rest);
     if (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
     if (cmd == "uci") cmd_uci();
-    else if (cmd == "isready") std::cout << "readyok\n";
+    else if (cmd == "isready") {
+        if (searching_.load()) pending_ready_.store(true);
+        else {
+            std::lock_guard<std::mutex> lk(out_m_);
+            std::cout << "readyok\n";
+        }
+    }
     else if (cmd == "ucinewgame") {
+        stop_search();
+        search_.tt().clear();
         pos_.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     }
     else if (cmd == "position") cmd_position(rest);
     else if (cmd == "go") cmd_go(rest);
+    else if (cmd == "stop") {
+        if (searching_.load()) stop_search();
+    }
     else if (cmd == "perft") cmd_perft(rest);
     else if (cmd == "divide") cmd_divide(rest);
     else if (cmd == "bench") cmd_bench();
@@ -257,14 +334,29 @@ bool Uci::handle_line(const std::string& line) {
     else if (cmd == "keytest") cmd_keytest(rest);
     else if (cmd == "setoption") {
         std::istringstream o(rest);
-        std::string tok, name, value;
-        o >> tok >> name >> tok >> value;
+        std::string tok, name, value, id;
+        o >> tok;  // "name"
+        // name may be one token here (Hash/Threads/NullMove/LMR/RFP/CheckExt)
+        o >> name;
+        o >> tok;  // "value"
+        o >> value;
         try {
-            if (name == "Threads" && !value.empty()) threads_ = std::stoi(value);
-            if (name == "Hash" && !value.empty()) hash_mb_ = std::stoi(value);
+            if (name == "Threads" && !value.empty()) {
+                int t = std::stoi(value);
+                if (t >= 1 && t <= 8 && !searching_.load()) threads_ = t;
+            } else if (name == "Hash" && !value.empty()) {
+                int h = std::stoi(value);
+                if (!searching_.load()) search_.tt().resize(h);
+            } else if (name == "NullMove") opts_.nullmove = (value == "true");
+            else if (name == "LMR") opts_.lmr = (value == "true");
+            else if (name == "RFP") opts_.rfp = (value == "true");
+            else if (name == "CheckExt") opts_.checkext = (value == "true");
         } catch (...) {}
+        (void)id;
     }
-    else if (cmd == "quit" || cmd == "exit") return false;
-    else if (cmd == "stop") searcher_.stop();
+    else if (cmd == "quit" || cmd == "exit") {
+        stop_search();
+        return false;
+    }
     return true;
 }

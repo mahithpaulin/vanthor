@@ -33,6 +33,9 @@ public:
 
     void do_move(Move m);
     void undo_move(Move m);
+    void do_null();    // null move (caller guarantees side not in check)
+    void undo_null();
+    bool has_non_pawn(Color c) const;
     const Undo& last_undo() const { return history_.back(); }
 
     bool in_check(Color c) const;
