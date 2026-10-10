@@ -5,11 +5,11 @@ competitively validate a high-performance UCI chess engine capable of
 being tested against **Stockfish 19** under preregistered, reproducible
 conditions.
 
-**Status (2026-10-10): v0.1.0 — plays legal chess (plain alpha-beta +
-quiescence + HCEv1, ~5 Mnps on 2-core x86). Correctness proven: 6/6 perft
-exact at two depths, python-chess cross-check, Zobrist/FEN integrity
-(keytest), ASan/UBSan clean. Strength: weak (no ID/PVS/TT yet — that is
-v0.2.0). No rating claims are made.**
+**Status (2026-10-10): v0.2.0 — real search (ID + aspiration + PVS + TT +
+killers/history + NMP/LMR/RFP + check extensions + Lazy SMP). WAC 239/300
+@200k nodes; beats v0.1.0 92-4-0 (+669 Elo, lower 95% bound +514) in
+paired-book play. Still HCE-only and far from Stockfish — next is v0.3.0
+(NNUE research). No rating claims are made.**
 
 ## Quick start
 
