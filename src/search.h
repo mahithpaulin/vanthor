@@ -1,6 +1,7 @@
 // VANTHOR search.h — v0.2.0: ID + aspiration + PVS + TT + LMR/NMP/RFP + SMP.
 #pragma once
 #include "position.h"
+#include "movegen.h"
 #include "tt.h"
 #include <atomic>
 #include <chrono>
