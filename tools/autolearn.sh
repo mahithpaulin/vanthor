@@ -98,6 +98,8 @@ while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
             set_state "$ROUND" VERIFY_MATCH; PHASE=VERIFY_MATCH
         else
             cp "$LEARN/corpus.txt" "$LEARN/kdata/train.txt"
+            # shuffle so the trainer's head-split validation is representative
+            shuf "$LEARN/corpus.txt" -o "$LEARN/kdata/train.txt"
             if [ ! -f "$LEARN/kdata/dataset-metadata.json" ]; then
                 "$KAGGLE" datasets init -p "$LEARN/kdata" >> "$LOG" 2>&1
                 python3 - "$LEARN/kdata/dataset-metadata.json" >> "$LOG" 2>&1 <<'EOF'
