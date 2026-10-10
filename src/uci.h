@@ -23,6 +23,7 @@ private:
     void cmd_perft(const std::string& args);
     void cmd_divide(const std::string& args);
     void cmd_bench();
+    void cmd_keytest(const std::string& args);
     void cmd_display();
     void cmd_eval();
     bool play_uci_moves(const std::string& moves);

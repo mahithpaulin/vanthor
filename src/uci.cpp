@@ -195,6 +195,46 @@ void Uci::cmd_eval() {
     std::cout << "eval " << evaluate(pos_) << "\n";
 }
 
+void Uci::cmd_keytest(const std::string& args) {
+    // Deterministic integrity test: play N pseudo-random games (LCG-selected
+    // legal moves), verifying incremental Zobrist key == recomputed key after
+    // every ply and FEN round-trip stability. Prints "keytest ok <plies>".
+    int games = 20;
+    try { if (!args.empty()) games = std::stoi(args); } catch (...) {}
+    if (games < 1) games = 1;
+    if (games > 500) games = 500;
+    uint64_t rng = 0x243F6A8885A308D3ULL;
+    auto rnd = [&]() {
+        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+        return rng;
+    };
+    long plies = 0;
+    for (int g = 0; g < games; g++) {
+        Position p;
+        for (int i = 0; i < 300; i++) {
+            MoveList ml;
+            generate_legal(p, ml);
+            if (ml.n == 0) break;
+            Move m = ml.m[rnd() % (uint64_t)ml.n];
+            p.do_move(m);
+            plies++;
+            if (!p.key_ok()) {
+                std::cout << "keytest FAIL incremental key mismatch game " << g
+                          << " ply " << i << " " << move_name(m) << "\n";
+                return;
+            }
+            Position q;
+            if (!q.set_fen(p.fen()) || q.key() != p.key() ||
+                q.fen() != p.fen()) {
+                std::cout << "keytest FAIL fen round-trip game " << g
+                          << " ply " << i << "\n";
+                return;
+            }
+        }
+    }
+    std::cout << "keytest ok " << plies << "\n";
+}
+
 bool Uci::handle_line(const std::string& line) {
     std::istringstream in(line);
     std::string cmd;
@@ -214,6 +254,7 @@ bool Uci::handle_line(const std::string& line) {
     else if (cmd == "bench") cmd_bench();
     else if (cmd == "d") cmd_display();
     else if (cmd == "eval") cmd_eval();
+    else if (cmd == "keytest") cmd_keytest(rest);
     else if (cmd == "setoption") {
         std::istringstream o(rest);
         std::string tok, name, value;

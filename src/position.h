@@ -39,6 +39,9 @@ public:
     bool is_attacked(int sq, Color by) const;
     int repetitions() const;  // occurrences of current key in game history
 
+    // debug: recompute key from scratch and compare with incremental key
+    bool key_ok() const { return key_ == compute_key(); }
+
     static void init_zobrist();
 
 private:
