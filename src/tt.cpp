@@ -23,22 +23,22 @@ void TT::resize(int megabytes) {
     size_t want = (size_t)megabytes * 1024 * 1024 / sizeof(TTSlot);
     size_t n = 1;
     while (n * 2 <= want) n *= 2;
-    table_.clear();
-    table_.resize(n);
+    table_.reset(new TTSlot[n]());
+    size_ = n;
     mask_ = n - 1;
     clear();
 }
 
 void TT::clear() {
-    for (auto& s : table_) {
-        s.key.store(0, std::memory_order_relaxed);
-        s.data.store(0, std::memory_order_relaxed);
+    for (size_t i = 0; i < size_; i++) {
+        table_[i].key.store(0, std::memory_order_relaxed);
+        table_[i].data.store(0, std::memory_order_relaxed);
     }
 }
 
 TTEntry TT::probe(Key key) {
     TTEntry e;
-    if (table_.empty() || key == 0) return e;
+    if (!table_ || key == 0) return e;
     TTSlot& slot = table_[key & mask_];
     Key k1 = slot.key.load(std::memory_order_acquire);
     uint64_t data = slot.data.load(std::memory_order_relaxed);
@@ -51,7 +51,7 @@ TTEntry TT::probe(Key key) {
 }
 
 void TT::store(Key key, Move move, Score score, uint8_t depth, TTFlag flag) {
-    if (table_.empty() || key == 0 || move == NO_MOVE) return;
+    if (!table_ || key == 0 || move == NO_MOVE) return;
     TTSlot& slot = table_[key & mask_];
     // depth-preferred replacement with always-replace fallback for shallow
     uint64_t old = slot.data.load(std::memory_order_relaxed);

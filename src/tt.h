@@ -3,7 +3,7 @@
 #include "types.h"
 #include <atomic>
 #include <cstdint>
-#include <vector>
+#include <memory>
 
 enum TTFlag : uint8_t { TT_NONE = 0, TT_EXACT = 1, TT_LOWER = 2, TT_UPPER = 3 };
 
@@ -26,13 +26,14 @@ public:
     TT() { resize(16); }
     void resize(int megabytes);
     void clear();
-    size_t size() const { return table_.size(); }
+    size_t size() const { return size_; }
 
     TTEntry probe(Key key);
     void store(Key key, Move move, Score score, uint8_t depth, TTFlag flag);
 
 private:
-    std::vector<TTSlot> table_;
+    std::unique_ptr<TTSlot[]> table_;  // atomics: no vector (non-movable)
+    size_t size_ = 0;
     size_t mask_ = 0;
 
     static uint64_t pack(Move m, Score s, uint8_t d, TTFlag f);
