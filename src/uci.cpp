@@ -105,6 +105,8 @@ void Uci::stop_search() {
 
 void Uci::cmd_go(const std::string& args) {
     if (searching_.load()) stop_search();  // stop any previous search first
+    else if (worker_.joinable()) worker_.join();  // reap finished worker
+    // (assigning a new thread to a joinable std::thread would terminate)
     SearchLimits lim;
     lim.depth = 64;
     int64_t movetime = -1, wtime = -1, btime = -1, winc = 0, binc = 0;
